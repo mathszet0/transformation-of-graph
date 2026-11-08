@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>y = f(x) 圖像轉換互動教學工具</title>
+<style>
+  * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { margin: 0; padding: 16px; background: #f8fafc; color: #0f172a; }
+  .card { max-width: 750px; margin: 0 auto; background: #ffffff; padding: 20px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+  h3 { margin-top: 0; text-align: center; color: #1e293b; font-size: 1.35rem; margin-bottom: 16px; }
+  
+  /* 頂部文字模式選擇按鈕 (伸展/收縮擺最後) */
+  .mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+  @media (max-width: 550px) { .mode-grid { grid-template-columns: repeat(2, 1fr); } }
+  
+  .mode-btn { padding: 12px 8px; font-size: 0.95rem; font-weight: 600; border: 2px solid #cbd5e1; background: #f1f5f9; color: #334155; border-radius: 10px; cursor: pointer; transition: all 0.2s; text-align: center; }
+  .mode-btn.active { background: #2563eb; color: white; border-color: #2563eb; box-shadow: 0 4px 10px rgba(37, 99, 235, 0.25); }
+  
+  .slider-box { background: #f8fafc; padding: 12px 16px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 16px; }
+  .slider-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-weight: 600; color: #334155; }
+  input[type=range] { width: 100%; height: 8px; border-radius: 4px; background: #cbd5e1; outline: none; }
+  
+  .ticks-label { display: flex; justify-content: space-between; font-size: 0.75rem; color: #64748b; margin-top: 4px; font-weight: 600; }
+
+  .canvas-container { position: relative; width: 100%; aspect-ratio: 1; max-width: 550px; margin: 0 auto; }
+  canvas { width: 100%; height: 100%; border-radius: 12px; border: 1px solid #cbd5e1; background: #ffffff; touch-action: none; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h3>y = f(x) 圖像轉換直覺演示</h3>
+  
+  <!-- 重新排列：伸展/收縮擺在最後 -->
+  <div class="mode-grid">
+    <button class="mode-btn active" dataset-mode="v_shift" onclick="setMode('v_shift')">[ 圖像垂直平移 ]</button>
+    <button class="mode-btn" dataset-mode="h_shift" onclick="setMode('h_shift')">[ 圖像水平平移 ]</button>
+    <button class="mode-btn" dataset-mode="ref_x" onclick="setMode('ref_x')">[ 圖像沿 x 軸反射 ]</button>
+    <button class="mode-btn" dataset-mode="ref_y" onclick="setMode('ref_y')">[ 圖像沿 y 軸反射 ]</button>
+    <button class="mode-btn" dataset-mode="v_stretch" onclick="setMode('v_stretch')">[ 圖像垂直伸展/收縮 ]</button>
+    <button class="mode-btn" dataset-mode="h_stretch" onclick="setMode('h_stretch')">[ 圖像水平伸展/收縮 ]</button>
+  </div>
+
+  <div class="slider-box" id="sliderContainer">
+    <div class="slider-header">
+      <span id="sliderTitle">拖拉改變 k 的數值：</span>
+      <span id="kValDisplay" style="color:#2563eb; font-size:1.1rem;">k = 2.0</span>
+    </div>
+    <input type="range" id="kSlider" min="-5" max="5" step="0.5" value="2">
+    <div class="ticks-label" id="ticksNotice" style="display:none;">
+      <span>0.2 (0&lt;k&lt;1 區間)</span>
+      <span>1.0 (原圖)</span>
+      <span>3.5 (k&gt;1 區間)</span>
+    </div>
+  </div>
+
+  <div class="canvas-container">
+    <canvas id="canvas"></canvas>
+  </div>
+</div>
+
+<script>
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const kSlider = document.getElementById('kSlider');
+  const kValDisplay = document.getElementById('kValDisplay');
+  const sliderContainer = document.getElementById('sliderContainer');
+  const ticksNotice = document.getElementById('ticksNotice');
+
+  let currentMode = 'v_shift';
+
+  // 基礎二次函數：f(x) = x² - 2x - 2
+  function f(x) {
+    return x * x - 2 * x - 2;
+  }
+
+  // 數值格式化：無理數/小數精確至 3 位有效數字 (3 significant figures)
+  function formatNum(num) {
+    if (Math.abs(num) < 1e-9) return "0";
+    if (Math.abs(num - Math.round(num)) < 1e-6) {
+      return Math.round(num).toString();
+    }
+    let sfStr = num.toPrecision(3);
+    return parseFloat(sfStr).toString();
+  }
+
+  function setMode(mode) {
+    currentMode = mode;
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.getAttribute('dataset-mode') === mode);
+    });
+
+    if (mode === 'ref_x' || mode === 'ref_y') {
+      sliderContainer.style.display = 'none';
+    } else if (mode === 'v_stretch' || mode === 'h_stretch') {
+      // 伸展/收縮模式：k 必須 > 0，微細 step = 0.1，預設 2.0
+      sliderContainer.style.display = 'block';
+      ticksNotice.style.display = 'flex';
+      kSlider.min = "0.1";
+      kSlider.max = "3.5";
+      kSlider.step = "0.1";
+      kSlider.value = "2.0";
+    } else {
+      // 平移模式：k 範圍 -5 至 +5
+      sliderContainer.style.display = 'block';
+      ticksNotice.style.display = 'none';
+      kSlider.min = "-5";
+      kSlider.max = "5";
+      kSlider.step = "0.5";
+      kSlider.value = "2.0";
+    }
+    draw();
+  }
+
+  // 取得變換後二次函數 g(x) = ax² + bx + c 的係數
+  function getParams(mode, k) {
+    let a, b, c;
+    switch (mode) {
+      case 'v_shift':   a = 1; b = -2; c = -2 + k; break;
+      case 'h_shift':   a = 1; b = -2 * (k + 1); c = k * k + 2 * k - 2; break;
+      case 'v_stretch': a = k; b = -2 * k; c = -2 * k; break;
+      case 'h_stretch': a = k * k; b = -2 * k; c = -2; break;
+      case 'ref_x':     a = -1; b = 2; c = 2; break;
+      case 'ref_y':     a = 1; b = 2; c = -2; break;
+      default:          a = 1; b = -2; c = -2; break;
+    }
+    return { a, b, c };
+  }
+
+  function getTransformedY(x, mode, k) {
+    switch (mode) {
+      case 'v_shift':   return f(x) + k;
+      case 'h_shift':   return f(x - k);
+      case 'v_stretch': return k * f(x);
+      case 'h_stretch': return f(k * x);
+      case 'ref_x':     return -f(x);
+      case 'ref_y':     return f(-x);
+      default:          return f(x);
+    }
+  }
+
+  function getTransformedFormula(mode, k) {
+    const kAbs = Math.abs(k);
+    switch (mode) {
+      case 'v_shift': 
+        if (k === 0) return 'y = f(x)';
+        return k > 0 ? `y = f(x) + ${kAbs}` : `y = f(x) - ${kAbs}`;
+      case 'h_shift': 
+        if (k === 0) return 'y = f(x)';
+        return k > 0 ? `y = f(x - ${kAbs})` : `y = f(x + ${kAbs})`;
+      case 'v_stretch': return `y = ${k} · f(x)`;
+      case 'h_stretch': return `y = f(${k} · x)`;
+      case 'ref_x':     return `y = -f(x)`;
+      case 'ref_y':     return `y = f(-x)`;
+    }
+  }
+
+  const xMin = -7, xMax = 7, yMin = -7, yMax = 7;
+
+  function toSX(x, w) { return ((x - xMin) / (xMax - xMin)) * w; }
+  function toSY(y, h) { return h - ((y - yMin) / (yMax - yMin)) * h; }
+
+  function resize() {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+    draw();
+  }
+
+  function drawGrid(w, h) {
+    ctx.clearRect(0, 0, w, h);
+    ctx.strokeStyle = '#f1f5f9';
+    ctx.lineWidth = 1;
+
+    for (let x = Math.ceil(xMin); x <= xMax; x++) {
+      let sx = toSX(x, w);
+      ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, h); ctx.stroke();
+    }
+    for (let y = Math.ceil(yMin); y <= yMax; y++) {
+      let sy = toSY(y, h);
+      ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(w, sy); ctx.stroke();
+    }
+
+    ctx.strokeStyle = '#94a3b8';
+    ctx.lineWidth = 1.5;
+    let y0 = toSY(0, h), x0 = toSX(0, w);
+    ctx.beginPath(); ctx.moveTo(0, y0); ctx.lineTo(w, y0); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x0, 0); ctx.lineTo(x0, h); ctx.stroke();
+
+    ctx.fillStyle = '#64748b';
+    ctx.font = '11px sans-serif';
+    for (let x = Math.ceil(xMin); x <= xMax; x += 2) {
+      if (x !== 0) ctx.fillText(x, toSX(x, w) - 4, y0 + 14);
+    }
+    for (let y = Math.ceil(yMin); y <= yMax; y += 2) {
+      if (y !== 0) ctx.fillText(y, x0 + 5, toSY(y, h) + 4);
+    }
+  }
+
+  function drawCurve(fn, color, width, isDashed = false) {
+    const w = canvas.getBoundingClientRect().width;
+    const h = canvas.getBoundingClientRect().height;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    if (isDashed) ctx.setLineDash([6, 6]);
+
+    let started = false;
+    for (let x = xMin; x <= xMax; x += 0.05) {
+      let y = fn(x);
+      let sx = toSX(x, w);
+      let sy = toSY(y, h);
+
+      if (!started) {
+        ctx.moveTo(sx, sy);
+        started = true;
+      } else {
+        ctx.lineTo(sx, sy);
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawPointWithLabel(x, y, text, dotColor, textColor, bgColor, posDir = 'top-right') {
+    const w = canvas.getBoundingClientRect().width;
+    const h = canvas.getBoundingClientRect().height;
+
+    if (x < xMin || x > xMax || y < yMin || y > yMax) return;
+
+    let sx = toSX(x, w);
+    let sy = toSY(y, h);
+
+    ctx.beginPath();
+    ctx.arc(sx, sy, 4.5, 0, Math.PI * 2);
+    ctx.fillStyle = dotColor;
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
+
+    ctx.font = 'bold 11px sans-serif';
+    const textWidth = ctx.measureText(text).width;
+    const padH = 5, padV = 3;
+
+    let tx = sx + 8;
+    let ty = sy - 8;
+
+    if (posDir === 'top-left') {
+      tx = sx - textWidth - 12;
+      ty = sy - 8;
+    } else if (posDir === 'bottom-left') {
+      tx = sx - textWidth - 12;
+      ty = sy + 14;
+    } else if (posDir === 'bottom-right') {
+      tx = sx + 8;
+      ty = sy + 14;
+    }
+
+    tx = Math.max(8, Math.min(w - textWidth - 10, tx));
+    ty = Math.max(14, Math.min(h - 8, ty));
+
+    ctx.fillStyle = bgColor;
+    ctx.beginPath();
+    if (ctx.roundRect) {
+      ctx.roundRect(tx - padH, ty - 10 - padV, textWidth + padH * 2, 16, 4);
+    } else {
+      ctx.rect(tx - padH, ty - 10 - padV, textWidth + padH * 2, 16);
+    }
+    ctx.fill();
+
+    ctx.fillStyle = textColor;
+    ctx.fillText(text, tx, ty);
+  }
+
+  function drawBadgeLabel(text, xVal, yVal, textColor, bgColor) {
+    const w = canvas.getBoundingClientRect().width;
+    const h = canvas.getBoundingClientRect().height;
+    
+    let sx = toSX(xVal, w);
+    let sy = toSY(yVal, h);
+
+    sx = Math.max(65, Math.min(w - 95, sx));
+    sy = Math.max(30, Math.min(h - 30, sy));
+
+    ctx.font = 'bold 13px sans-serif';
+    const textWidth = ctx.measureText(text).width;
+    const paddingH = 8, paddingV = 4;
+
+    ctx.fillStyle = bgColor;
+    ctx.beginPath();
+    if (ctx.roundRect) {
+      ctx.roundRect(sx - paddingH, sy - 12 - paddingV, textWidth + paddingH * 2, 24, 6);
+    } else {
+      ctx.rect(sx - paddingH, sy - 12 - paddingV, textWidth + paddingH * 2, 24);
+    }
+    ctx.fill();
+
+    ctx.fillStyle = textColor;
+    ctx.fillText(text, sx, sy);
+  }
+
+  function draw() {
+    const w = canvas.getBoundingClientRect().width;
+    const h = canvas.getBoundingClientRect().height;
+    const k = parseFloat(kSlider.value);
+    kValDisplay.innerText = `k = ${k}`;
+
+    drawGrid(w, h);
+
+    // 1. 灰色原圖像 y = f(x)
+    drawCurve(f, '#64748b', 2, true);
+    drawBadgeLabel('y = f(x)', 1.2, f(1.2) - 0.5, '#475569', 'rgba(241, 245, 249, 0.9)');
+
+    // 顯示原圖像 f(x) 的頂點、y截距、x截距
+    drawPointWithLabel(1, -3, '(1, -3)', '#64748b', '#475569', 'rgba(241, 245, 249, 0.95)', 'bottom-left');
+    drawPointWithLabel(0, -2, '(0, -2)', '#64748b', '#475569', 'rgba(241, 245, 249, 0.95)', 'top-left');
+    let origX1 = 1 - Math.sqrt(3);
+    let origX2 = 1 + Math.sqrt(3);
+    drawPointWithLabel(origX1, 0, `(${formatNum(origX1)}, 0)`, '#64748b', '#475569', 'rgba(241, 245, 249, 0.95)', 'top-left');
+    drawPointWithLabel(origX2, 0, `(${formatNum(origX2)}, 0)`, '#64748b', '#475569', 'rgba(241, 245, 249, 0.95)', 'top-left');
+
+    // 2. 藍色變換圖像 y = g(x)
+    const transformedFn = (x) => getTransformedY(x, currentMode, k);
+    drawCurve(transformedFn, '#2563eb', 3.5, false);
+
+    // 繪畫藍色圖像關鍵點
+    const { a, b, c } = getParams(currentMode, k);
+
+    // y 截距
+    drawPointWithLabel(0, c, `(0, ${formatNum(c)})`, '#2563eb', '#ffffff', '#2563eb', 'bottom-right');
+
+    // 頂點 & x 截距
+    if (Math.abs(a) > 1e-9) {
+      let xv = -b / (2 * a);
+      let yv = a * xv * xv + b * xv + c;
+      drawPointWithLabel(xv, yv, `(${formatNum(xv)}, ${formatNum(yv)})`, '#2563eb', '#ffffff', '#2563eb', 'bottom-right');
+
+      let delta = b * b - 4 * a * c;
+      if (delta >= 0) {
+        let x1 = (-b - Math.sqrt(delta)) / (2 * a);
+        let x2 = (-b + Math.sqrt(delta)) / (2 * a);
+        drawPointWithLabel(x1, 0, `(${formatNum(x1)}, 0)`, '#2563eb', '#ffffff', '#2563eb', 'bottom-right');
+        if (Math.abs(x1 - x2) > 1e-4) {
+          drawPointWithLabel(x2, 0, `(${formatNum(x2)}, 0)`, '#2563eb', '#ffffff', '#2563eb', 'bottom-right');
+        }
+      }
+    }
+
+    // 計算藍色公式卡片位置
+    let labelX = 1;
+    if (currentMode === 'h_shift') labelX = 1 + k;
+    if (currentMode === 'h_stretch' && k !== 0) labelX = 1 / k;
+    if (currentMode === 'ref_y') labelX = -1;
+    
+    let labelY = transformedFn(labelX);
+    let blueLabelText = getTransformedFormula(currentMode, k);
+
+    drawBadgeLabel(blueLabelText, labelX + 0.3, labelY + 0.8, '#ffffff', '#1d4ed8');
+  }
+
+  kSlider.addEventListener('input', draw);
+  window.addEventListener('resize', resize);
+
+  setMode('v_shift');
+  setTimeout(resize, 50);
+</script>
+</body>
+</html>
